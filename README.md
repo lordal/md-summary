@@ -4,7 +4,7 @@ URLs.
 
 ### Requirements
 
-* perl 5.20 or newer
+* perl 5.18 or newer
 
 ### Usage
 
