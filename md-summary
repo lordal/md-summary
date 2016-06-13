@@ -151,7 +151,7 @@ foreach my $host ( keys %{$sps{'Other'}} ) {
   } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /^\/samldefault.aspx$/i) {
     $sps{'Cornerstone'}->{$host} = $sps{'Other'}->{$host};
     delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /^\/acs/i || $sps{'Other'}->{$host}->{'POST'} =~ /^\/saml2\/acs\//) {
+  } elsif ($sps{'Other'}->{$host}->{'POST'} && ($sps{'Other'}->{$host}->{'POST'} =~ /^\/acs/i || $sps{'Other'}->{$host}->{'POST'} =~ /^\/saml2\/acs\//)) {
     $sps{'PySAML'}->{$host} = $sps{'Other'}->{$host};
     delete $sps{'Other'}->{$host};
 #  } else {
