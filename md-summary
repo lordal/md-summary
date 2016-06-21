@@ -1,173 +1,359 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
+use XML::LibXML;
+use Getopt::Long;
 
-# scan SAML metadata and try to determine all the IdP types
+my $help = <<EOM;
+Usage: $0 [-h|--help] [-e] [-r] -f <md file> [-s <reg auth>]
+  -h | --help   Prints this help message.
+  -e            Prints entity category stats.
+  -r            Prints registration authority stats.
+  -f <md file>  File to parse.
+  -s <reg auth> Show only entites registered with specific
+                federation.
 
-if ($#ARGV != 0) {
-  die "Usage: $0 metadata-file\n";
+ADFS entites often have both IDPSSODescriptor and SPSSODescriptor,
+ entity categories for the entity will be counted for both.
+EOM
+
+my ($printCat, $printReg, $file, $printHelp, $showReg);
+my $res = GetOptions (
+	"e" => \$printCat,
+	"r" => \$printReg,
+	"f=s" => \$file,
+	"s=s" => \$showReg,
+	"h|help" => \$printHelp,
+);
+
+if (! $file || $printHelp) {
+	print $help;
+	exit;
 }
 
-my %idps = ( 'Shibboleth' => {}, 'SimpleSAMLphp' => {}, 'ADFS' => {}, 'Other' => {} );
-my %sps  = ( 'Shibboleth' => {}, 'SimpleSAMLphp' => {}, 'ADFS' => {}, 'Other' => {} );
+my $doc = XML::LibXML->load_xml(location => $file);
+my %idps = ( 'Other' => {} );
+my %sps  = ( 'Other' => {} );
+my %regAuth = ( 'idp' => {}, 'sp' => {});
+my %entCat = ();
 my %expected = ( 'idp' => 0, 'sp' => 0 ); 
+my $reg = qr(^https?://([^/:]+)(?::\d+)?(/.+)$);
 
-open(MD, '<' . $ARGV[0]);
-
-my $re = qr(^\s*<(?:.+:)?(SingleSignOnService|AssertionConsumerService)\s(?:.+\s)?Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-([^"]+)" Location="https?://([^/:]+)(?::\d+)?(/[^"]+)"(?:\s.+)?/>\s*$);
-
-while (<MD>) {
-  chomp;
-  if (/$re/) {
-    my ($element, $binding, $host, $path) = ($1,$2, $3, $4);
-    if ($element eq 'SingleSignOnService') {
-      $expected{'idp'}++ if (!defined($idps{'Other'}->{$host}));
-      $idps{'Other'}->{$host}->{$binding} = $path;
-    } elsif ($element eq 'AssertionConsumerService') {
-      $expected{'sp'}++ if (!defined($sps{'Other'}->{$host}));
-      $sps{'Other'}->{$host}->{$binding} = $path;
-    }
-  }
-}
-close(MD);
-
-# Find any remaining Shibboleth IdPs and merge with post-simplesign
-# Shibboleth Redirect and POST URIs are consistent
-foreach my $host ( keys %{$idps{'Other'}} ) {
-  if (   defined($idps{'Other'}->{$host}->{'POST-SimpleSign'})
-      || $idps{'Other'}->{$host}->{'POST'} && $idps{'Other'}->{$host}->{'POST'} =~ /profile\/(Shibboleth\/)?SAML2\/POST\/SSO$/
-      || $idps{'Other'}->{$host}->{'Redirect'} && $idps{'Other'}->{$host}->{'Redirect'} =~ /profile\/(Shibboleth\/)?SAML2\/Redirect\/SSO$/) {
-    $idps{'Shibboleth'}->{$host} = $idps{'Other'}->{$host};
-    delete $idps{'Other'}{$host};
-  } elsif (   $idps{'Other'}->{$host}->{'POST'} && $idps{'Other'}->{$host}->{'POST'} =~ /saml2\/idp\/SSOService.php$/
-           || $idps{'Other'}->{$host}->{'Redirect'} && $idps{'Other'}->{$host}->{'Redirect'} =~ /saml2\/idp\/SSOService.php$/) {
-    $idps{'SimpleSAMLphp'}->{$host} = $idps{'Other'}->{$host};
-    delete $idps{'Other'}->{$host};
-  } elsif (   $idps{'Other'}->{$host}->{'POST'} && $idps{'Other'}->{$host}->{'POST'} =~ /adfs\/ls\/?$/
-           || $idps{'Other'}->{$host}->{'Redirect'} && $idps{'Other'}->{$host}->{'Redirect'} =~ /adfs\/ls\/?$/) {
-    $idps{'ADFS'}->{$host} = $idps{'Other'}->{$host};
-    delete $idps{'Other'}->{$host};
-  } elsif (   $idps{'Other'}->{$host}->{'POST'} && $idps{'Other'}->{$host}->{'POST'} =~ /\/oala\//
-           || $idps{'Other'}->{$host}->{'Redirect'} && $idps{'Other'}->{$host}->{'Redirect'} =~ /\/oala\//) {
-    $idps{'OpenAthens'}->{$host} = $idps{'Other'}->{$host};
-    delete $idps{'Other'}->{$host};
-  } elsif (   $idps{'Other'}->{$host}->{'POST'} && $idps{'Other'}->{$host}->{'POST'} =~ /\/idp\/SSO.saml2/
-           || $idps{'Other'}->{$host}->{'Redirect'} && $idps{'Other'}->{$host}->{'Redirect'} =~ /\/idp\/SSO.saml2/) {
-    $idps{'PingFederate'}->{$host} = $idps{'Other'}->{$host};
-    delete $idps{'Other'}->{$host};
-  } elsif (   $idps{'Other'}->{$host}->{'POST'} && $idps{'Other'}->{$host}->{'POST'} =~ /\/idp\/saml2\/sso/
-           || $idps{'Other'}->{$host}->{'Redirect'} && $idps{'Other'}->{$host}->{'Redirect'} =~ /\/idp\/saml2\/sso/) {
-    $idps{'Authentic 2'}->{$host} = $idps{'Other'}->{$host};
-    delete $idps{'Other'}->{$host};
-  } elsif (   $idps{'Other'}->{$host}->{'POST'} && $idps{'Other'}->{$host}->{'POST'} =~ /\/nidp\/saml2\/sso/
-           || $idps{'Other'}->{$host}->{'Redirect'} && $idps{'Other'}->{$host}->{'Redirect'} =~ /\/nidp\/saml2\/sso/) {
-    $idps{'Novell Access Manager'}->{$host} = $idps{'Other'}->{$host};
-    delete $idps{'Other'}->{$host};
-  } elsif (   $idps{'Other'}->{$host}->{'POST'} && $idps{'Other'}->{$host}->{'POST'} =~ /\/affwebservices\/public\/saml2sso/
-           || $idps{'Other'}->{$host}->{'Redirect'} && $idps{'Other'}->{$host}->{'Redirect'} =~ /\/affwebservices\/public\/saml2sso/) {
-    $idps{'CA SiteMinder'}->{$host} = $idps{'Other'}->{$host};
-    delete $idps{'Other'}->{$host};
-  } elsif (   $idps{'Other'}->{$host}->{'POST'} && $idps{'Other'}->{$host}->{'POST'} =~ /\/FIM\/sps\//
-           || $idps{'Other'}->{$host}->{'Redirect'} && $idps{'Other'}->{$host}->{'Redirect'} =~ /\/FIM\/sps\//) {
-    $idps{'IBM Tivoli FIM'}->{$host} = $idps{'Other'}->{$host};
-    delete $idps{'Other'}->{$host};
-  } elsif (   $idps{'Other'}->{$host}->{'POST'} && $idps{'Other'}->{$host}->{'POST'} =~ /\/sso\/post/
-           || $idps{'Other'}->{$host}->{'Redirect'} && $idps{'Other'}->{$host}->{'Redirect'} =~ /\/sso\/redirect/) {
-    $idps{'PySAML'}->{$host} = $idps{'Other'}->{$host};
-    delete $idps{'Other'}->{$host};
-  } else {
-#    printf "Other: %s %s %s\n", $host, $idps{'Other'}->{$host}->{'POST'}, $idps{'Other'}->{$host}->{'Redirect'};
-  }
+# remove namespaces
+for my $el ($doc->findnodes('//*')){
+	if($el->getNamespaces){
+		replace_without_ns($el);
+	}
 }
 
+# process metadata
+foreach my $entity ($doc->findnodes('//*')->get_nodelist()) {
+	next if ($entity->nodeName !~ /EntityDescriptor/);
+
+	my $entityID = $entity->findvalue('./@entityID');
+	my $regA = $entity->findvalue('./Extensions/RegistrationInfo/@registrationAuthority') if ($entity->findvalue('./Extensions/RegistrationInfo/@registrationAuthority'));
+
+	my @entCats;
+	if ($entity->findnodes('./Extensions/EntityAttributes')) {
+		foreach my $cat ($entity->findnodes('./Extensions/EntityAttributes/Attribute')) {
+			if ($cat->{Name} eq 'http://macedir.org/entity-category-support' || $cat->{Name} eq 'http://macedir.org/entity-category') {
+				foreach my $val ($cat->findnodes('./AttributeValue')) {
+					push @entCats, $val->findvalue('.');
+				}
+			}
+		}
+	}
+
+	if ($entity->findvalue('./IDPSSODescriptor')) {
+		$expected{'idp'}++ if (! defined($idps{'Other'}->{$entityID}));
+		$idps{'Other'}->{$entityID}->{'regAuth'} = $regA if ($regA);
+
+		if (scalar @entCats > 0) {
+			foreach my $val (@entCats) {
+				push @{$idps{'Other'}->{$entityID}->{'entCat'}}, $val;
+			}
+		}
+
+		foreach my $endPoint ($entity->findnodes('./IDPSSODescriptor/SingleSignOnService')) {
+			my $location = $endPoint->{Location};
+			my $binding = $endPoint->{Binding};
+			$binding =~ s/urn:oasis:names:tc:SAML:2.0:bindings:HTTP-//;
+			$location =~ /$reg/;
+			my ($hostName, $path) = ($1, $2);
+			$idps{'Other'}->{$entityID}->{$binding}->{'host'} = $hostName;
+			$idps{'Other'}->{$entityID}->{$binding}->{'path'} = $path;
+		}
+	}
+
+	if ($entity->findvalue('./SPSSODescriptor')) {
+		$expected{'sp'}++ if (! defined($sps{'Other'}->{$entityID}));
+		$sps{'Other'}->{$entityID}->{'regAuth'} = $regA if ($regA);
+
+		if (scalar @entCats > 0) {
+			foreach my $val (@entCats) {
+				push @{$sps{'Other'}->{$entityID}->{'entCat'}}, $val;
+			}
+		}
+
+		foreach my $endPoint ($entity->findnodes('./SPSSODescriptor/AssertionConsumerService')) {
+			my $location = $endPoint->{Location};
+			my $binding = $endPoint->{Binding};
+			$binding =~ s/urn:oasis:names:tc:SAML:2.0:bindings:HTTP-//;
+			$location =~ /$reg/;
+			my ($hostName, $path) = ($1, $2);
+			$sps{'Other'}->{$entityID}->{$binding}->{'host'} = $hostName;
+			$sps{'Other'}->{$entityID}->{$binding}->{'path'} = $path;
+		}
+	}
+}
+undef $doc;
+
+# process IDP entites
+foreach my $host (keys %{$idps{'Other'}}) {
+	if ($showReg && $showReg ne $idps{'Other'}->{$host}->{'regAuth'}) {
+		delete $idps{'Other'}{$host};
+		$expected{'idp'}--;
+		next;
+	}
+
+	$regAuth{'idp'}->{$idps{'Other'}->{$host}->{'regAuth'}}++ if ($idps{'Other'}->{$host}->{'regAuth'});
+	if ($idps{'Other'}->{$host}->{'entCat'}) {
+		foreach my $cat (@{$idps{'Other'}->{$host}->{'entCat'}}) {
+			$entCat{'idp'}->{$cat}++;
+		}
+	}
+
+	if ($idps{'Other'}->{$host}->{'POST-SimpleSign'}->{'path'}
+			|| $idps{'Other'}->{$host}->{'POST'}->{'path'} && $idps{'Other'}->{$host}->{'POST'}->{'path'} =~ /profile\/(Shibboleth\/)?SAML2\/POST\/SSO$/
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'path'} && $idps{'Other'}->{$host}->{'Redirect'}->{'path'} =~ /profile\/(Shibboleth\/)?SAML2\/Redirect\/SSO$/
+			|| $host =~ /\/shibboleth/i) {
+		$idps{'Shibboleth'}->{$host} = $idps{'Other'}->{$host};
+		delete $idps{'Other'}{$host};
+	} elsif ($idps{'Other'}->{$host}->{'POST'}->{'path'} && $idps{'Other'}->{$host}->{'POST'}->{'path'} =~ /saml2\/idp\/SSOService.php$/
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'path'} && $idps{'Other'}->{$host}->{'Redirect'}->{'path'} =~ /saml2\/idp\/SSOService.php$/
+			|| $host =~ /\/metadata.php$/i) {
+		$idps{'SimpleSAMLphp'}->{$host} = $idps{'Other'}->{$host};
+		delete $idps{'Other'}->{$host};
+	} elsif ($idps{'Other'}->{$host}->{'POST'}->{'path'} && $idps{'Other'}->{$host}->{'POST'}->{'path'} =~ /adfs\/ls\/?$/
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'path'} && $idps{'Other'}->{$host}->{'Redirect'}->{'path'} =~ /adfs\/ls\/?$/
+			|| $host =~ /\/adfs/
+			|| $idps{'Other'}->{$host}->{'POST'}->{'host'} && $idps{'Other'}->{$host}->{'POST'}->{'host'} =~ /login.microsoftonline.com/
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'host'} && $idps{'Other'}->{$host}->{'Redirect'}->{'host'} =~ /login.microsoftonline.com/) {
+		$idps{'ADFS'}->{$host} = $idps{'Other'}->{$host};
+		delete $idps{'Other'}->{$host};
+	} elsif ($idps{'Other'}->{$host}->{'POST'}->{'path'} && $idps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/oala\//
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'path'} && $idps{'Other'}->{$host}->{'Redirect'}->{'path'} =~ /\/oala\//
+			|| $idps{'Other'}->{$host}->{'POST'}->{'host'} && $idps{'Other'}->{$host}->{'POST'}->{'host'} =~ /login.openathens.net/
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'host'} && $idps{'Other'}->{$host}->{'Redirect'}->{'host'} =~ /login.openathens.net/
+			|| $host && $host =~ /\/openathens/i
+			|| $host && $host =~ /\/openathens/i) {
+		$idps{'OpenAthens'}->{$host} = $idps{'Other'}->{$host};
+		delete $idps{'Other'}->{$host};
+	} elsif ($idps{'Other'}->{$host}->{'POST'}->{'path'} && $idps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/idp\/SSO.saml2/
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'path'} && $idps{'Other'}->{$host}->{'Redirect'}->{'path'} =~ /\/idp\/SSO.saml2/) {
+		$idps{'PingFederate'}->{$host} = $idps{'Other'}->{$host};
+		delete $idps{'Other'}->{$host};
+	} elsif ($idps{'Other'}->{$host}->{'POST'}->{'path'} && $idps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/idp\/saml2\/sso/
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'path'} && $idps{'Other'}->{$host}->{'Redirect'}->{'path'} =~ /\/idp\/saml2\/sso/) {
+		$idps{'Authentic 2'}->{$host} = $idps{'Other'}->{$host};
+		delete $idps{'Other'}->{$host};
+	} elsif ($idps{'Other'}->{$host}->{'POST'}->{'path'} && $idps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/nidp\/saml2\/sso/
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'path'} && $idps{'Other'}->{$host}->{'Redirect'}->{'path'} =~ /\/nidp\/saml2\/sso/) {
+		$idps{'Novell Access Manager'}->{$host} = $idps{'Other'}->{$host};
+		delete $idps{'Other'}->{$host};
+	} elsif ($idps{'Other'}->{$host}->{'POST'}->{'path'} && $idps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/affwebservices\/public\/saml2sso/
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'path'} && $idps{'Other'}->{$host}->{'Redirect'}->{'path'} =~ /\/affwebservices\/public\/saml2sso/) {
+		$idps{'CA SiteMinder'}->{$host} = $idps{'Other'}->{$host};
+		delete $idps{'Other'}->{$host};
+	} elsif ($idps{'Other'}->{$host}->{'POST'}->{'path'} && $idps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/FIM\/sps\//
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'path'} && $idps{'Other'}->{$host}->{'Redirect'}->{'path'} =~ /\/FIM\/sps\//) {
+		$idps{'IBM Tivoli FIM'}->{$host} = $idps{'Other'}->{$host};
+		delete $idps{'Other'}->{$host};
+	} elsif ($idps{'Other'}->{$host}->{'POST'}->{'path'} && $idps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/sso\/post/
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'path'} && $idps{'Other'}->{$host}->{'Redirect'}->{'path'} =~ /\/sso\/redirect/) {
+		$idps{'PySAML'}->{$host} = $idps{'Other'}->{$host};
+		delete $idps{'Other'}->{$host};
+	} elsif ($idps{'Other'}->{$host}->{'POST'}->{'host'} && $idps{'Other'}->{$host}->{'POST'}->{'host'} =~ /engine.surfconext.nl/
+			|| $idps{'Other'}->{$host}->{'Redirect'}->{'host'} && $idps{'Other'}->{$host}->{'Redirect'}->{'host'} =~ /engine.surfconext.nl/) {
+		$idps{'SURFconext ADFS?'}->{$host} = $idps{'Other'}->{$host};
+		delete $idps{'Other'}->{$host};
+# 	} else {
+# 		printf "Other: %s, %s %s,  %s %s\n", $host,
+# 			$idps{'Other'}->{$host}->{'POST'}->{'host'} ? $idps{'Other'}->{$host}->{'POST'}->{'host'} : "",
+# 			$idps{'Other'}->{$host}->{'POST'}->{'path'} ? $idps{'Other'}->{$host}->{'POST'}->{'path'} : "",
+# 			$idps{'Other'}->{$host}->{'Redirect'}->{'host'} ? $idps{'Other'}->{$host}->{'Redirect'}->{'host'} : "",
+# 			$idps{'Other'}->{$host}->{'Redirect'}->{'path'} ? $idps{'Other'}->{$host}->{'Redirect'}->{'path'} : "";
+	}
+}
+
+# process SP entites
+foreach my $host ( keys %{$sps{'Other'}} ) {
+	if ($showReg && $showReg ne $sps{'Other'}->{$host}->{'regAuth'}) {
+		delete $sps{'Other'}->{$host};
+		$expected{'sp'}--;
+		next;
+	}
+
+	$regAuth{'sp'}->{$sps{'Other'}->{$host}->{'regAuth'}}++ if ($sps{'Other'}->{$host}->{'regAuth'});
+	if ($sps{'Other'}->{$host}->{'entCat'}) {
+		foreach my $cat (@{$sps{'Other'}->{$host}->{'entCat'}}) {
+			$entCat{'sp'}->{$cat}++;
+		}
+	}
+
+	if ($host =~ /\/shibboleth/i  || $host =~ /\/Shib/ || $sps{'Other'}->{$host}->{'POST'}->{'path'} && ($sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /shibboleth2?(post|\.(sso|shire))?(\/.*)$/i
+			|| $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /starrez.+shibboleth/i
+			|| $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\?auth=shibboleth/i
+			|| $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/saml2?\/post$/i
+			|| $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /sso\/shibbolethpost/i)) {
+		$sps{'Shibboleth'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/saml\/sp\/saml[12]-acs.php\//i
+			|| $host =~ /\/metadata.php$/i) {
+		$sps{'SimpleSAMLphp'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif (  $host =~ /\/adfs\//
+			|| $sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /adfs\/ls\/?$/i) {
+		$sps{'ADFS'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/sp\/acs.saml2/i) {
+		$sps{'PingFederate'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/saml\/SSO\/alias/i) {
+		$sps{'RSmart OneCampus?'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/saml_consume$/i) {
+		$sps{'OneLogin'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/affwebservices\/public\/saml2assertionconsumer/i) {
+		$sps{'CA SiteMinder'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /\/auth\/update\/saml/i) {
+		$sps{'Philo'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /^\/login\/saml$/i) {
+		$sps{'Instructure?'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /^\/action\/saml2post$/i) {
+		$sps{'Atypon Literatum?'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /^\/controls\/login\/assertionconsumerservice.aspx/i) {
+		$sps{'iModules?'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /^\/saml\/acs$/i) {
+		$sps{'UprisingTech?'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /^\/user\/authenticate$/i) {
+		$sps{'Kaltura?'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /^\/mng\/pdsHandleLogin$/i) {
+		$sps{'ExLibris?'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /^\/session\/shib$/i) {
+		$sps{'Ingenta?'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /^\/auth\/saml\/consume$/i) {
+		$sps{'Kuali'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /^\/samldefault.aspx$/i) {
+		$sps{'Cornerstone'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+	} elsif ($sps{'Other'}->{$host}->{'POST'}->{'path'} && ($sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /^\/acs/i || $sps{'Other'}->{$host}->{'POST'}->{'path'} =~ /^\/saml2\/acs\//)) {
+		$sps{'PySAML'}->{$host} = $sps{'Other'}->{$host};
+		delete $sps{'Other'}->{$host};
+# 	} else {
+# 		printf "Other: %s, %s %s,  %s %s\n", $host,
+# 			$sps{'Other'}->{$host}->{'POST'}->{'host'} ? $sps{'Other'}->{$host}->{'POST'}->{'host'} : "",
+# 			$sps{'Other'}->{$host}->{'POST'}->{'path'} ? $sps{'Other'}->{$host}->{'POST'}->{'path'} : "",
+# 			$sps{'Other'}->{$host}->{'Redirect'}->{'host'} ? $sps{'Other'}->{$host}->{'Redirect'}->{'host'} : "",
+# 			$sps{'Other'}->{$host}->{'Redirect'}->{'path'} ? $sps{'Other'}->{$host}->{'Redirect'}->{'path'} : "";
+	}
+
+}
+
+# print IDP stats
 my $total = $expected{'idp'};
 if ($total > 0) {
-  printf("Identity Providers (%d):\n", $total);
-  foreach my $name (sort { return (scalar keys %{$idps{$b}}) <=> (scalar keys %{$idps{$a}}); } keys %idps) {
-    my $count = scalar keys %{$idps{$name}};
-    printf("  %-22s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
-    $expected{'idp'} -= $count;
-  }
+	printf("Identity Providers (%d):\n", $total);
+	foreach my $name (sort { return (scalar keys %{$idps{$b}}) <=> (scalar keys %{$idps{$a}}); } keys %idps) {
+		my $count = scalar keys %{$idps{$name}};
+		printf("  %-32s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
+		$expected{'idp'} -= $count;
+	}
+	if (keys %{$regAuth{'idp'}} > 0 && $printReg) {
+		print "\nPer federation\n";
+		foreach my $name (sort { return ( $regAuth{'idp'}->{$b}) <=> ( $regAuth{'idp'}->{$a}); } keys %{$regAuth{'idp'}}) {
+			my $count = $regAuth{'idp'}->{$name};
+			printf("  %-32s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
+		}
+	}
+	if ($entCat{'idp'} && $printCat) {
+		print "\nEntity categories\n";
+		foreach my $name (sort { return ( $entCat{'idp'}->{$b}) <=> ( $entCat{'idp'}->{$a}); } keys %{$entCat{'idp'}}) {
+			my $count = $entCat{'idp'}->{$name};
+			printf("  %-60s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
+		}
+	}
+	printf("  Unaccounted for: %d\n", $expected{'idp'}) if ($expected{'idp'} > 0);
+	print "\n\n\n";
 }
 
-printf("  Unaccounted for: %d\n", $expected{'idp'}) if ($expected{'idp'} > 0);
-
-# Find any remaining Shibboleth IdPs and merge with post-simplesign
-# Shibboleth Redirect and POST URIs are consistent
-foreach my $host ( keys %{$sps{'Other'}} ) {
-#  if ($sps{'Other'}->{$host}->{'POST'} =~ /shibboleth/i) {
-  if (   $sps{'Other'}->{$host}->{'POST'} && ($sps{'Other'}->{$host}->{'POST'} =~ /shibboleth2?(post|\.(sso|shire))?(\/.*)$/i
-      || $sps{'Other'}->{$host}->{'POST'} =~ /starrez.+shibboleth/i
-      || $sps{'Other'}->{$host}->{'POST'} =~ /\?auth=shibboleth/i
-      || $sps{'Other'}->{$host}->{'POST'} =~ /\/saml2?\/post$/i
-      || $sps{'Other'}->{$host}->{'POST'} =~ /sso\/shibbolethpost/i)) {
-    $sps{'Shibboleth'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /\/saml\/sp\/saml[12]-acs.php\//i) {
-    $sps{'SimpleSAMLphp'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /adfs\/ls\/?$/i) {
-    $sps{'ADFS'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /\/sp\/acs.saml2/i) {
-    $sps{'PingFederate'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /\/saml\/SSO\/alias/i) {
-    $sps{'RSmart OneCampus?'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /\/saml_consume$/i) {
-    $sps{'OneLogin'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /\/affwebservices\/public\/saml2assertionconsumer/i) {
-    $sps{'CA SiteMinder'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /\/auth\/update\/saml/i) {
-    $sps{'Philo'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /^\/login\/saml$/i) {
-    $sps{'Instructure?'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /^\/action\/saml2post$/i) {
-    $sps{'Atypon Literatum?'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /^\/controls\/login\/assertionconsumerservice.aspx$/i) {
-    $sps{'iModules?'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /^\/saml\/acs$/i) {
-    $sps{'UprisingTech?'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /^\/user\/authenticate$/i) {
-    $sps{'Kaltura?'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /^\/mng\/pdsHandleLogin$/i) {
-    $sps{'ExLibris?'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /^\/session\/shib$/i) {
-    $sps{'Ingenta?'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /^\/auth\/saml\/consume$/i) {
-    $sps{'Kuali'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && $sps{'Other'}->{$host}->{'POST'} =~ /^\/samldefault.aspx$/i) {
-    $sps{'Cornerstone'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-  } elsif ($sps{'Other'}->{$host}->{'POST'} && ($sps{'Other'}->{$host}->{'POST'} =~ /^\/acs/i || $sps{'Other'}->{$host}->{'POST'} =~ /^\/saml2\/acs\//)) {
-    $sps{'PySAML'}->{$host} = $sps{'Other'}->{$host};
-    delete $sps{'Other'}->{$host};
-#  } else {
-#    printf("OTHER: %s %s\n", $host, $sps{'Other'}->{$host}->{'POST'});
-  }
-
-}
-
+# print SP stats
 $total = $expected{'sp'}; 
 if ($total > 0) {
-  printf("Service Providers (%d):\n", $total);
-  foreach my $name (sort { return (scalar keys %{$sps{$b}}) <=> (scalar keys %{$sps{$a}}); } keys %sps) {
-    my $count = scalar keys %{$sps{$name}};
-    printf("  %-22s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
-    $expected{'sp'} -= $count;
-  }
+	printf("Service Providers (%d):\n", $total);
+	foreach my $name (sort { return (scalar keys %{$sps{$b}}) <=> (scalar keys %{$sps{$a}}); } keys %sps) {
+		my $count = scalar keys %{$sps{$name}};
+		printf("  %-32s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
+		$expected{'sp'} -= $count;
+	}
+	if (keys %{$regAuth{'sp'}} > 0 && $printReg) {
+		print "\nPer federation\n";
+		foreach my $name (sort { return ( $regAuth{'sp'}->{$b}) <=> ( $regAuth{'sp'}->{$a}); } keys %{$regAuth{'sp'}}) {
+			my $count = $regAuth{'sp'}->{$name};
+			printf("  %-32s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
+		}
+	}
+	if ($entCat{'sp'} && $printCat) {
+		print "\nEntity categories\n";
+		foreach my $name (sort { return ( $entCat{'sp'}->{$b}) <=> ( $entCat{'sp'}->{$a}); } keys %{$entCat{'sp'}}) {
+			my $count = $entCat{'sp'}->{$name};
+			printf("  %-60s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
+		}
+	}
+	printf("  Unaccounted for: %d\n", $expected{'sp'}) if ($expected{'sp'} > 0);
 }
 
-printf("  Unaccounted for: %d\n", $expected{'sp'}) if ($expected{'sp'} > 0);
+
+exit;
+
+# replaces the given element with an identical one without the namespace
+# also does this with attributes
+sub replace_without_ns {
+	my ($el) = @_;
+	# new element has same name, minus namespace
+	my $new = XML::LibXML::Element->new( $el->localname );
+	#copy attributes (minus namespace namespace)
+	for my $att($el->attributes){
+		if($att->nodeName !~ /xmlns(?::|$)/){
+			$new->setAttribute($att->localname, $att->value);
+		}
+	}
+	#move children
+	for my $child($el->childNodes){
+		$new->appendChild($child);
+	}
+
+	# if working with the root element, we have to set the new element
+	# to be the new root
+	my $doc = $el->ownerDocument;
+	if( $el->isSameNode($doc->documentElement) ){
+		$doc->setDocumentElement($new);
+		return;
+	}
+	#otherwise just paste the new element in place of the old element
+	$el->parentNode->insertAfter($new, $el);
+	$el->unbindNode;
+	return;
+}
+
