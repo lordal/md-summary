@@ -69,9 +69,7 @@ foreach my $entity ($doc->findnodes('//*')->get_nodelist()) {
 		$idps{'Other'}->{$entityID}->{'regAuth'} = $regA if ($regA);
 
 		if (scalar @entCats > 0) {
-			foreach my $val (@entCats) {
-				push @{$idps{'Other'}->{$entityID}->{'entCat'}}, $val;
-			}
+			@{$idps{'Other'}->{$entityID}->{'entCat'}} = @entCats;
 		}
 
 		foreach my $endPoint ($entity->findnodes('./IDPSSODescriptor/SingleSignOnService')) {
@@ -90,9 +88,7 @@ foreach my $entity ($doc->findnodes('//*')->get_nodelist()) {
 		$sps{'Other'}->{$entityID}->{'regAuth'} = $regA if ($regA);
 
 		if (scalar @entCats > 0) {
-			foreach my $val (@entCats) {
-				push @{$sps{'Other'}->{$entityID}->{'entCat'}}, $val;
-			}
+			@{$sps{'Other'}->{$entityID}->{'entCat'}} = @entCats;
 		}
 
 		foreach my $endPoint ($entity->findnodes('./SPSSODescriptor/AssertionConsumerService')) {
