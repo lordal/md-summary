@@ -7,6 +7,7 @@ use Getopt::Long;
 my $help = <<EOM;
 Usage: $0 [-h|--help] [-e] [-r] -f <md file> [-s <reg auth>]
   -h | --help   Prints this help message.
+  -a            Prints assurance-certification.
   -e            Prints entity category stats.
   -r            Prints registration authority stats.
   -f <md file>  File to parse.
@@ -17,8 +18,9 @@ ADFS entites often have both IDPSSODescriptor and SPSSODescriptor,
  entity categories for the entity will be counted for both.
 EOM
 
-my ($printCat, $printReg, $file, $printHelp, $showReg);
+my ($printAssurance, $printCat, $printReg, $file, $printHelp, $showReg);
 my $res = GetOptions (
+	"a" => \$printAssurance,
 	"e" => \$printCat,
 	"r" => \$printReg,
 	"f=s" => \$file,
@@ -35,6 +37,7 @@ my $doc = XML::LibXML->load_xml(location => $file);
 my %idps = ( 'Other' => {} );
 my %sps  = ( 'Other' => {} );
 my %regAuth = ( 'idp' => {}, 'sp' => {});
+my %assuCert = ( 'idp' => {}, 'sp' => {});
 my %entCat = ();
 my %expected = ( 'idp' => 0, 'sp' => 0 ); 
 my $reg = qr(^https?://([^/:]+)(?::\d+)?(/.+)$);
@@ -64,12 +67,27 @@ foreach my $entity ($doc->findnodes('//*')->get_nodelist()) {
 		}
 	}
 
+	my @assuCerts;
+	if ($entity->findnodes('./Extensions/EntityAttributes')) {
+		foreach my $cert ($entity->findnodes('./Extensions/EntityAttributes/Attribute')) {
+			if ($cert->{Name} eq 'urn:oasis:names:tc:SAML:attribute:assurance-certification') {
+				foreach my $val ($cert->findnodes('./AttributeValue')) {
+					push @assuCerts, $val->findvalue('.');
+				}
+			}
+		}
+	}
+
 	if ($entity->findvalue('./IDPSSODescriptor')) {
 		$expected{'idp'}++ if (! defined($idps{'Other'}->{$entityID}));
 		$idps{'Other'}->{$entityID}->{'regAuth'} = $regA if ($regA);
 
 		if (scalar @entCats > 0) {
 			@{$idps{'Other'}->{$entityID}->{'entCat'}} = @entCats;
+		}
+
+		if (scalar @assuCerts > 0) {
+			@{$idps{'Other'}->{$entityID}->{'assuCert'}} = @assuCerts;
 		}
 
 		foreach my $endPoint ($entity->findnodes('./IDPSSODescriptor/SingleSignOnService')) {
@@ -89,6 +107,10 @@ foreach my $entity ($doc->findnodes('//*')->get_nodelist()) {
 
 		if (scalar @entCats > 0) {
 			@{$sps{'Other'}->{$entityID}->{'entCat'}} = @entCats;
+		}
+
+		if (scalar @assuCerts > 0) {
+			@{$sps{'Other'}->{$entityID}->{'assuCert'}} = @assuCerts;
 		}
 
 		foreach my $endPoint ($entity->findnodes('./SPSSODescriptor/AssertionConsumerService')) {
@@ -116,6 +138,11 @@ foreach my $host (keys %{$idps{'Other'}}) {
 	if ($idps{'Other'}->{$host}->{'entCat'}) {
 		foreach my $cat (@{$idps{'Other'}->{$host}->{'entCat'}}) {
 			$entCat{'idp'}->{$cat}++;
+		}
+	}
+	if ($idps{'Other'}->{$host}->{'assuCert'}) {
+		foreach my $cert (@{$idps{'Other'}->{$host}->{'assuCert'}}) {
+			$assuCert{'idp'}->{$cert}++;
 		}
 	}
 
@@ -194,6 +221,11 @@ foreach my $host ( keys %{$sps{'Other'}} ) {
 	if ($sps{'Other'}->{$host}->{'entCat'}) {
 		foreach my $cat (@{$sps{'Other'}->{$host}->{'entCat'}}) {
 			$entCat{'sp'}->{$cat}++;
+		}
+	}
+	if ($sps{'Other'}->{$host}->{'assuCert'}) {
+		foreach my $cert (@{$sps{'Other'}->{$host}->{'assuCert'}}) {
+			$assuCert{'sp'}->{$cert}++;
 		}
 	}
 
@@ -290,6 +322,13 @@ if ($total > 0) {
 			printf("  %-60s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
 		}
 	}
+	if ($assuCert{'idp'} && $printAssurance) {
+		print "\nAssurance certification\n";
+		foreach my $name (sort { return ( $assuCert{'idp'}->{$b}) <=> ( $assuCert{'idp'}->{$a}); } keys %{$assuCert{'idp'}}) {
+			my $count = $assuCert{'idp'}->{$name};
+			printf("  %-60s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
+		}
+	}
 	printf("  Unaccounted for: %d\n", $expected{'idp'}) if ($expected{'idp'} > 0);
 	print "\n\n\n";
 }
@@ -314,6 +353,13 @@ if ($total > 0) {
 		print "\nEntity categories\n";
 		foreach my $name (sort { return ( $entCat{'sp'}->{$b}) <=> ( $entCat{'sp'}->{$a}); } keys %{$entCat{'sp'}}) {
 			my $count = $entCat{'sp'}->{$name};
+			printf("  %-60s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
+		}
+	}
+	if ($assuCert{'sp'} && $printAssurance) {
+		print "\nAssurance certification\n";
+		foreach my $name (sort { return ( $assuCert{'sp'}->{$b}) <=> ( $assuCert{'sp'}->{$a}); } keys %{$assuCert{'sp'}}) {
+			my $count = $assuCert{'sp'}->{$name};
 			printf("  %-60s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
 		}
 	}
