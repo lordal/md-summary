@@ -44,9 +44,9 @@ if (! $file || $printHelp) {
 my $doc = XML::LibXML->load_xml(location => $file);
 my %idps = ( 'Other' => {} );
 my %sps  = ( 'Other' => {} );
-my %regAuth = ( 'idp' => {}, 'sp' => {});
-my %assuCert = ( 'idp' => {}, 'sp' => {});
-my %entCat = ();
+my %regAuth = ( 'idp' => {}, 'sp' => {} );
+my %assuCert = ( 'idp' => {}, 'sp' => {} );
+my %entCat = ( 'idp' => {}, 'sp' => {} );
 my %expected = ( 'idp' => 0, 'sp' => 0 ); 
 my $reg = qr(^https?://([^/:]+)(?::\d+)?(/.+)$);
 
@@ -136,17 +136,17 @@ undef $doc;
 
 # process IDP entites
 foreach my $host (keys %{$idps{'Other'}}) {
-	if ($showReg && $showReg ne $idps{'Other'}->{$host}->{'regAuth'}) {
+	if ($showReg && $idps{'Other'}->{$host}->{'regAuth'} && $showReg ne $idps{'Other'}->{$host}->{'regAuth'}) {
 		delete $idps{'Other'}{$host};
 		$expected{'idp'}--;
 		next;
 	}
-	if ($showCat && ! grep { $showCat eq $_ } @{$idps{'Other'}->{$host}->{'entCat'}}) {
+	if ($showCat && $idps{'Other'}->{$host}->{'entCat'} && ! grep { $showCat eq $_ } @{$idps{'Other'}->{$host}->{'entCat'}}) {
 		delete $idps{'Other'}->{$host};
 		$expected{'idp'}--;
 		next;
 	}
-	if ($showCert && ! grep { $showCert eq $_ } @{$idps{'Other'}->{$host}->{'assuCert'}}) {
+	if ($showCert && $idps{'Other'}->{$host}->{'assuCert'} && ! grep { $showCert eq $_ } @{$idps{'Other'}->{$host}->{'assuCert'}}) {
 		delete $idps{'Other'}->{$host};
 		$expected{'idp'}--;
 		next;
@@ -234,17 +234,17 @@ foreach my $host (keys %{$idps{'Other'}}) {
 
 # process SP entites
 foreach my $host ( keys %{$sps{'Other'}} ) {
-	if ($showReg && $showReg ne $sps{'Other'}->{$host}->{'regAuth'}) {
+	if ($showReg && $sps{'Other'}->{$host}->{'regAuth'} && $showReg ne $sps{'Other'}->{$host}->{'regAuth'}) {
 		delete $sps{'Other'}->{$host};
 		$expected{'sp'}--;
 		next;
 	}
-	if ($showCat && ! grep { $showCat eq $_ } @{$sps{'Other'}->{$host}->{'entCat'}}) {
+	if ($showCat && $sps{'Other'}->{$host}->{'entCat'} && ! grep { $showCat eq $_ } @{$sps{'Other'}->{$host}->{'entCat'}}) {
 		delete $sps{'Other'}->{$host};
 		$expected{'sp'}--;
 		next;
 	}
-	if ($showCert && ! grep { $showCert eq $_ } @{$sps{'Other'}->{$host}->{'assuCert'}}) {
+	if ($showCert && $sps{'Other'}->{$host}->{'assuCert'} && ! grep { $showCert eq $_ } @{$sps{'Other'}->{$host}->{'assuCert'}}) {
 		delete $sps{'Other'}->{$host};
 		$expected{'sp'}--;
 		next;
@@ -351,11 +351,7 @@ if ($total > 0) {
 		foreach my $name (sort { return ( $regAuth{'idp'}->{$b}->{'count'}) <=> ( $regAuth{'idp'}->{$a}->{'count'}); } keys %{$regAuth{'idp'}}) {
 			my $count = $regAuth{'idp'}->{$name}->{'count'};
 			printf("  %-32s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
-			if ($printEntities) {
-				foreach my $ent (@{$regAuth{'idp'}->{$name}->{'ent'}}) {
-					printf("    %s\n", $ent);
-				}
-			}
+			print "    ".join("\n    ", @{$regAuth{'idp'}->{$name}->{'ent'}})."\n" if ($printEntities);
 		}
 	}
 	if ($entCat{'idp'} && $printCat) {
@@ -363,11 +359,7 @@ if ($total > 0) {
 		foreach my $name (sort { return ( $entCat{'idp'}->{$b}->{'count'}) <=> ( $entCat{'idp'}->{$a}->{'count'}); } keys %{$entCat{'idp'}}) {
 			my $count = $entCat{'idp'}->{$name}->{'count'};
 			printf("  %-60s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
-			if ($printEntities) {
-				foreach my $ent (@{$entCat{'idp'}->{$name}->{'ent'}}) {
-					printf("    %s\n", $ent);
-				}
-			}
+			print "    ".join("\n    ", @{$entCat{'idp'}->{$name}->{'ent'}})."\n" if ($printEntities);
 		}
 	}
 	if ($assuCert{'idp'} && $printAssurance) {
@@ -375,11 +367,7 @@ if ($total > 0) {
 		foreach my $name (sort { return ( $assuCert{'idp'}->{$b}->{'count'}) <=> ( $assuCert{'idp'}->{$a}->{'count'}); } keys %{$assuCert{'idp'}}) {
 			my $count = $assuCert{'idp'}->{$name}->{'count'};
 			printf("  %-60s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
-			if ($printEntities) {
-				foreach my $ent (@{$assuCert{'idp'}->{$name}->{'ent'}}) {
-					printf("    %s\n", $ent);
-				}
-			}
+			print "    ".join("\n    ", @{$assuCert{'idp'}->{$name}->{'ent'}})."\n" if ($printEntities);
 		}
 	}
 	printf("  Unaccounted for: %d\n", $expected{'idp'}) if ($expected{'idp'} > 0);
@@ -400,11 +388,7 @@ if ($total > 0) {
 		foreach my $name (sort { return ( $regAuth{'sp'}->{$b}->{'count'}) <=> ( $regAuth{'sp'}->{$a}->{'count'}); } keys %{$regAuth{'sp'}}) {
 			my $count = $regAuth{'sp'}->{$name}->{'count'};
 			printf("  %-32s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
-			if ($printEntities) {
-				foreach my $ent (@{$regAuth{'sp'}->{$name}->{'ent'}}) {
-					printf("    %s\n", $ent);
-				}
-			}
+			print "    ".join("\n    ", @{$regAuth{'sp'}->{$name}->{'ent'}})."\n" if ($printEntities);
 		}
 	}
 	if ($entCat{'sp'} && $printCat) {
@@ -412,11 +396,7 @@ if ($total > 0) {
 		foreach my $name (sort { return ( $entCat{'sp'}->{$b}->{'count'}) <=> ( $entCat{'sp'}->{$a}->{'count'}); } keys %{$entCat{'sp'}}) {
 			my $count = $entCat{'sp'}->{$name}->{'count'};
 			printf("  %-60s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
-			if ($printEntities) {
-				foreach my $ent (@{$entCat{'sp'}->{$name}->{'ent'}}) {
-					printf("    %s\n", $ent);
-				}
-			}
+			print "    ".join("\n    ", @{$entCat{'sp'}->{$name}->{'ent'}})."\n" if ($printEntities);
 		}
 	}
 	if ($assuCert{'sp'} && $printAssurance) {
@@ -424,11 +404,7 @@ if ($total > 0) {
 		foreach my $name (sort { return ( $assuCert{'sp'}->{$b}->{'count'}) <=> ( $assuCert{'sp'}->{$a}->{'count'}); } keys %{$assuCert{'sp'}}) {
 			my $count = $assuCert{'sp'}->{$name}->{'count'};
 			printf("  %-60s %4d (%5.1f%%)\n", $name, $count, (100.0 * $count) / $total);
-			if ($printEntities) {
-				foreach my $ent (@{$assuCert{'sp'}->{$name}->{'ent'}}) {
-					printf("    %s\n", $ent);
-				}
-			}
+			print "    ".join("\n    ", @{$assuCert{'sp'}->{$name}->{'ent'}})."\n" if ($printEntities);
 		}
 	}
 	printf("  Unaccounted for: %d\n", $expected{'sp'}) if ($expected{'sp'} > 0);
