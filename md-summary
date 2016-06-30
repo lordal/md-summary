@@ -136,17 +136,17 @@ undef $doc;
 
 # process IDP entites
 foreach my $host (keys %{$idps{'Other'}}) {
-	if ($showReg && $idps{'Other'}->{$host}->{'regAuth'} && $showReg ne $idps{'Other'}->{$host}->{'regAuth'}) {
+	if (($showReg && $idps{'Other'}->{$host}->{'regAuth'} && $showReg ne $idps{'Other'}->{$host}->{'regAuth'}) || ($showReg && ! $idps{'Other'}->{$host}->{'regAuth'})) {
 		delete $idps{'Other'}{$host};
 		$expected{'idp'}--;
 		next;
 	}
-	if ($showCat && $idps{'Other'}->{$host}->{'entCat'} && ! grep { $showCat eq $_ } @{$idps{'Other'}->{$host}->{'entCat'}}) {
+	if (($showCat && $idps{'Other'}->{$host}->{'entCat'} && ! grep { $showCat eq $_ } @{$idps{'Other'}->{$host}->{'entCat'}}) || ($showCat && ! $idps{'Other'}->{$host}->{'entCat'})) {
 		delete $idps{'Other'}->{$host};
 		$expected{'idp'}--;
 		next;
 	}
-	if ($showCert && $idps{'Other'}->{$host}->{'assuCert'} && ! grep { $showCert eq $_ } @{$idps{'Other'}->{$host}->{'assuCert'}}) {
+	if (($showCert && $idps{'Other'}->{$host}->{'assuCert'} && ! grep { $showCert eq $_ } @{$idps{'Other'}->{$host}->{'assuCert'}}) || ($showCert && ! $idps{'Other'}->{$host}->{'assuCert'})) {
 		delete $idps{'Other'}->{$host};
 		$expected{'idp'}--;
 		next;
@@ -234,17 +234,17 @@ foreach my $host (keys %{$idps{'Other'}}) {
 
 # process SP entites
 foreach my $host ( keys %{$sps{'Other'}} ) {
-	if ($showReg && $sps{'Other'}->{$host}->{'regAuth'} && $showReg ne $sps{'Other'}->{$host}->{'regAuth'}) {
+	if (($showReg && $sps{'Other'}->{$host}->{'regAuth'} && $showReg ne $sps{'Other'}->{$host}->{'regAuth'}) || ($showReg && ! $sps{'Other'}->{$host}->{'regAuth'})) {
 		delete $sps{'Other'}->{$host};
 		$expected{'sp'}--;
 		next;
 	}
-	if ($showCat && $sps{'Other'}->{$host}->{'entCat'} && ! grep { $showCat eq $_ } @{$sps{'Other'}->{$host}->{'entCat'}}) {
+	if (($showCat && $sps{'Other'}->{$host}->{'entCat'} && ! grep { $showCat eq $_ } @{$sps{'Other'}->{$host}->{'entCat'}}) || ($showCat && ! $sps{'Other'}->{$host}->{'entCat'})) {
 		delete $sps{'Other'}->{$host};
 		$expected{'sp'}--;
 		next;
 	}
-	if ($showCert && $sps{'Other'}->{$host}->{'assuCert'} && ! grep { $showCert eq $_ } @{$sps{'Other'}->{$host}->{'assuCert'}}) {
+	if (($showCert && $sps{'Other'}->{$host}->{'assuCert'} && ! grep { $showCert eq $_ } @{$sps{'Other'}->{$host}->{'assuCert'}}) || ($showCert && ! $sps{'Other'}->{$host}->{'assuCert'})) {
 		delete $sps{'Other'}->{$host};
 		$expected{'sp'}--;
 		next;
